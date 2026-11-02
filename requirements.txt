@@ -1,0 +1,4 @@
+pyautogui>=0.9.54
+keyboard>=0.13.5
+pywin32>=312
+pillow>=10.0.0

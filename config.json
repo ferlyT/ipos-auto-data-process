@@ -1,0 +1,82 @@
+{
+    "emergency_hotkey": "f12",
+    "expected_process_duration_sec": 30,
+    "min_wait_before_check_sec": 15,
+    "settle_delay_sec": 1.5,
+    "popup_poll_interval_sec": 1.0,
+    "max_wait_minutes_per_month": 45,
+    "auto_annual_after_december": true,
+    "check_perbaikan_stok": false,
+    "window_title_keywords": [
+        "Proses Bulanan",
+        "Proses Tahunan",
+        "Proses Data",
+        "iPos",
+        "Program iPos",
+        "Proses Tutup Tahun",
+        "Tutup Tahun"
+    ],
+    "calibrated": true,
+    "coords": {
+        "tab_proses_data": [
+            621,
+            43
+        ],
+        "ribbon_bulanan": [
+            22,
+            94
+        ],
+        "ribbon_tahunan": [
+            68,
+            85
+        ],
+        "bulanan_dropdown_bulan": [
+            955,
+            553
+        ],
+        "bulanan_spin_tahun": [
+            1052,
+            559
+        ],
+        "bulanan_chk_perbaikan_stok": [
+            874,
+            531
+        ],
+        "bulanan_btn_proses": [
+            980,
+            617
+        ],
+        "bulanan_label_status": [
+            947,
+            682
+        ],
+        "bulanan_btn_tutup": [
+            1127,
+            723
+        ],
+        "tahunan_spin_tahun": [
+            1050,
+            569
+        ],
+        "tahunan_btn_proses": [
+            980,
+            627
+        ],
+        "tahunan_btn_tutup": [
+            1125,
+            722
+        ],
+        "modal_btn_yes": [
+            1038,
+            587
+        ],
+        "modal_btn_no": [
+            1091,
+            638
+        ],
+        "popup_btn_ok": [
+            960,
+            570
+        ]
+    }
+}
