@@ -152,12 +152,27 @@ class AutoProcessorEngine:
 
         # 1. Dynamic rect offset: selalu ikuti posisi dialog terkini di mana pun ditarik/digeser pengguna di layar
         rect = self.get_dialog_rect("bulanan" if dialog_type == "bulanan" else "tahunan")
-        offsets = REL_OFFSETS_BULANAN if dialog_type == "bulanan" else REL_OFFSETS_TAHUNAN
 
-        if rect and control_name in offsets:
-            left, top, _, _ = rect
-            dx, dy = offsets[control_name]
-            return (left + dx, top + dy)
+        if rect:
+            left, top, right, bottom = rect
+            w = right - left
+            h = bottom - top
+
+            # Tombol [ Tutup ] selalu berada di pojok kanan bawah dialog (berlaku untuk bulanan & tahunan)
+            if control_name == "btn_tutup":
+                return (right - 70, bottom - 35)
+
+            if dialog_type == "tahunan":
+                # Form Proses Tutup Tahun lebih tinggi (ada 4 paragraf keterangan teks)
+                if control_name == "spin_tahun":
+                    return (int(left + w * 0.734), int(top + h * 0.602))
+                elif control_name == "btn_proses":
+                    return (int(left + w * 0.526), int(top + h * 0.746))
+            else:
+                offsets = REL_OFFSETS_BULANAN
+                if control_name in offsets:
+                    dx, dy = offsets[control_name]
+                    return (left + dx, top + dy)
 
         # 2. Prioritaskan koordinat hasil kalibrasi pengguna jika dialog belum terdeteksi rect-nya
         if cfg.get("calibrated") and cfg_key in user_coords and user_coords[cfg_key]:
@@ -424,82 +439,128 @@ class AutoProcessorEngine:
 
         return False
 
-    def open_dialog_bulanan(self):
+    def close_dialog(self, dialog_type: str = "bulanan") -> bool:
+        """
+        Closes dialog (bulanan or tahunan) and verifies it is actually closed.
+        Uses 4-stage fallback:
+        1. Click [ Tutup ] at (right - 70, bottom - 35).
+        2. Click window [X] at (right - 20, top + 15).
+        3. Send Alt+F4.
+        4. Send Esc.
+        """
+        name = "Proses Tutup Tahun" if dialog_type == "tahunan" else "Proses Bulanan"
+        self.log(f"Menutup dialog '{name}'...")
+        if self.simulation:
+            time.sleep(0.05)
+            return True
+
+        for attempt in range(4):
+            rect = self.get_dialog_rect(dialog_type)
+            if not rect:
+                self.log(f"Dialog '{name}' berhasil ditutup.")
+                return True
+
+            left, top, right, bottom = rect
+
+            if attempt == 0:
+                # 1. Klik tombol [ Tutup ] di pojok kanan bawah
+                self.safe_click(right - 70, bottom - 35, f"Tombol Tutup {name}")
+            elif attempt == 1:
+                # 2. Klik tombol close window [X] di pojok kanan atas
+                self.safe_click(right - 20, top + 15, f"Tombol [X] {name}")
+            elif attempt == 2:
+                # 3. Kirim Alt+F4
+                pyautogui.hotkey('alt', 'f4')
+            else:
+                # 4. Kirim Esc
+                pyautogui.press('esc')
+
+            time.sleep(0.6)
+
+        return not bool(self.get_dialog_rect(dialog_type))
+
+    def close_dialog_bulanan(self):
+        return self.close_dialog("bulanan")
+
+    def close_dialog_tahunan(self):
+        return self.close_dialog("tahunan")
+
+    def open_dialog_bulanan(self) -> bool:
         """Click the 'Proses Bulanan' ribbon button to open the monthly dialog."""
         if self.simulation:
             time.sleep(0.05)
-            return
+            return True
 
         self.focus_ipos_window()
-        # Jika dialog sudah terbuka di layar, gunakan langsung
+
+        # Pastikan dialog tahunan tertutup terlebih dahulu jika masih terbuka
+        if self.get_dialog_rect("tahunan"):
+            self.log("Menemukan dialog 'Proses Tutup Tahun' masih terbuka. Menutupnya...")
+            self.close_dialog("tahunan")
+            time.sleep(0.5)
+
+        # Jika dialog bulanan sudah terbuka di layar, gunakan langsung
         if self.get_dialog_rect("bulanan"):
             self.log("Dialog 'Proses Bulanan' sudah terbuka dan aktif.")
-            return
+            return True
 
         self.log("Membuka dialog 'Proses Bulanan' dari Ribbon...")
         cfg = load_config()
 
-        # 1. Pastikan Tab 'Proses Data' di menu atas aktif
-        pt_tab = resolve_target_coordinate("tab_proses_data", user_coords=cfg.get("coords"))
-        self.safe_click(pt_tab[0], pt_tab[1], "Tab Proses Data")
-        time.sleep(0.3)
+        for attempt in range(3):
+            # 1. Pastikan Tab 'Proses Data' di menu atas aktif
+            pt_tab = resolve_target_coordinate("tab_proses_data", user_coords=cfg.get("coords"))
+            self.safe_click(pt_tab[0], pt_tab[1], "Tab Proses Data")
+            time.sleep(0.4)
 
-        # 2. Klik tombol Ribbon 'Proses Bulanan'
-        pt = resolve_target_coordinate("ribbon_bulanan", "ribbon_bulanan.png", cfg.get("coords"))
-        self.log(f"Mengklik tombol Ribbon 'Proses Bulanan' di ({pt[0]}, {pt[1]})...")
-        self.safe_click(pt[0], pt[1], "Ribbon Proses Bulanan")
-        time.sleep(1.2)
+            # 2. Klik tombol Ribbon 'Proses Bulanan'
+            pt = resolve_target_coordinate("ribbon_bulanan", "ribbon_bulanan.png", cfg.get("coords"))
+            self.log(f"Mengklik tombol Ribbon 'Proses Bulanan' di ({pt[0]}, {pt[1]})...")
+            self.safe_click(pt[0], pt[1], "Ribbon Proses Bulanan")
+            time.sleep(1.2)
 
-    def close_dialog_bulanan(self):
-        """Click the 'Tutup' button on the monthly dialog."""
-        self.log("Menutup dialog 'Proses Bulanan'...")
-        if self.simulation:
-            time.sleep(0.05)
-            return
+            if self.get_dialog_rect("bulanan"):
+                self.log("Dialog 'Proses Bulanan' berhasil terbuka.")
+                return True
 
-        pt = self.get_control_coord("btn_tutup", "bulanan")
-        self.safe_click(pt[0], pt[1], "Tombol Tutup Bulanan")
-        time.sleep(0.5)
-        if self.get_dialog_rect("bulanan"):
-            pyautogui.press('esc')
-            time.sleep(0.5)
+        return False
 
-    def open_dialog_tahunan(self):
+    def open_dialog_tahunan(self) -> bool:
         """Click the 'Proses Tahunan' ribbon button to open annual dialog."""
         if self.simulation:
             time.sleep(0.05)
-            return
+            return True
 
         self.focus_ipos_window()
-        if self.get_dialog_rect("tahunan"):
-            self.log("Dialog 'Proses Tahunan' sudah terbuka dan aktif.")
-            return
 
-        self.log("Membuka dialog 'Proses Tahunan' dari Ribbon...")
+        # Pastikan dialog bulanan ditutup terlebih dahulu!
+        if self.get_dialog_rect("bulanan"):
+            self.log("Menutup dialog 'Proses Bulanan' sebelum membuka Tutup Tahun...")
+            self.close_dialog("bulanan")
+            time.sleep(0.5)
+
+        if self.get_dialog_rect("tahunan"):
+            self.log("Dialog 'Proses Tutup Tahun' sudah terbuka dan aktif.")
+            return True
+
+        self.log("Membuka dialog 'Proses Tutup Tahun' dari Ribbon...")
         cfg = load_config()
 
-        pt_tab = resolve_target_coordinate("tab_proses_data", user_coords=cfg.get("coords"))
-        self.safe_click(pt_tab[0], pt_tab[1], "Tab Proses Data")
-        time.sleep(0.3)
+        for attempt in range(3):
+            pt_tab = resolve_target_coordinate("tab_proses_data", user_coords=cfg.get("coords"))
+            self.safe_click(pt_tab[0], pt_tab[1], "Tab Proses Data")
+            time.sleep(0.4)
 
-        pt = resolve_target_coordinate("ribbon_tahunan", "ribbon_tahunan.png", cfg.get("coords"))
-        self.log(f"Mengklik tombol Ribbon 'Proses Tahunan' di ({pt[0]}, {pt[1]})...")
-        self.safe_click(pt[0], pt[1], "Ribbon Proses Tahunan")
-        time.sleep(1.2)
+            pt = resolve_target_coordinate("ribbon_tahunan", "ribbon_tahunan.png", cfg.get("coords"))
+            self.log(f"Mengklik tombol Ribbon 'Proses Tahunan' di ({pt[0]}, {pt[1]})...")
+            self.safe_click(pt[0], pt[1], "Ribbon Proses Tahunan")
+            time.sleep(1.2)
 
-    def close_dialog_tahunan(self):
-        """Click the 'Tutup' button on the annual dialog."""
-        self.log("Menutup dialog 'Proses Tahunan'...")
-        if self.simulation:
-            time.sleep(0.05)
-            return
+            if self.get_dialog_rect("tahunan"):
+                self.log("Dialog 'Proses Tutup Tahun' berhasil terbuka.")
+                return True
 
-        pt = self.get_control_coord("btn_tutup", "tahunan")
-        self.safe_click(pt[0], pt[1], "Tombol Tutup Tahunan")
-        time.sleep(0.5)
-        if self.get_dialog_rect("tahunan"):
-            pyautogui.press('esc')
-            time.sleep(0.5)
+        return False
 
     def trigger_monthly_process(self, year: int, month_idx: int):
         """
@@ -517,6 +578,18 @@ class AutoProcessorEngine:
         if not self.simulation:
             self.focus_ipos_window()
             time.sleep(0.2)
+
+            # Validasi ketat: Pastikan dialog Proses Bulanan terbuka dan bukan dialog Tutup Tahun
+            if self.get_dialog_rect("tahunan"):
+                self.log("Terdeteksi dialog 'Proses Tutup Tahun' masih terbuka. Menutupnya...")
+                self.close_dialog("tahunan")
+                time.sleep(0.4)
+
+            if not self.get_dialog_rect("bulanan"):
+                self.log("Dialog 'Proses Bulanan' belum terbuka. Membuka dialog bulanan...")
+                if not self.open_dialog_bulanan():
+                    self.log("ERROR: Gagal membuka dialog 'Proses Bulanan'!")
+                    return False
 
             # 1. Pilih Bulan via Dropdown
             pt_bulan = self.get_control_coord("dropdown_bulan", "bulanan")
@@ -606,7 +679,9 @@ class AutoProcessorEngine:
         self.close_dialog_bulanan()
 
         # 2. Buka dialog Proses Tahunan dari Ribbon
-        self.open_dialog_tahunan()
+        if not self.open_dialog_tahunan():
+            self.log("ERROR: Gagal membuka dialog 'Proses Tutup Tahun'!")
+            return False
 
         if not self.simulation:
             # 3. Set Tahun pada dialog Proses Tahunan
