@@ -313,16 +313,22 @@ class AutoProcessorEngine:
         1. Checks for completion popup dialog (MessageBox with OK).
         2. Inspects [Tutup] button status (disabled -> enabled green icon).
         3. Updates live seconds counter without any false positives.
+        - For Proses Tahunan: Polling runs faster with checks every 5 seconds.
         """
         cfg = load_config()
-        poll_interval = cfg.get("popup_poll_interval_sec", 1.0)
-        expected_sec = cfg.get("expected_process_duration_sec", 30)
-        min_wait_sec = cfg.get("min_wait_before_check_sec", 12)
+        is_tahunan = (dialog_type == "tahunan")
+
+        # Proses tahunan berjalan jauh lebih cepat: cek modal & tombol selesai dipercepat
+        poll_interval = cfg.get("tahunan_poll_interval_sec", 0.5) if is_tahunan else cfg.get("popup_poll_interval_sec", 1.0)
+        expected_sec = cfg.get("tahunan_expected_duration_sec", 10) if is_tahunan else cfg.get("expected_process_duration_sec", 30)
+        min_wait_sec = cfg.get("tahunan_min_wait_before_check_sec", 4) if is_tahunan else cfg.get("min_wait_before_check_sec", 12)
+        log_interval = 5 if is_tahunan else 10
         user_coords = cfg.get("coords", {})
         start_time = time.time()
         last_log_sec = 0
 
-        self.log(f"Kalkulasi database sedang berjalan (estimasi ~{expected_sec}s)...")
+        proc_label = "Tutup Tahun" if is_tahunan else "Bulanan"
+        self.log(f"Kalkulasi database ({proc_label}) sedang berjalan (estimasi ~{expected_sec}s)...")
 
         while not self._stop_event.is_set():
             elapsed = time.time() - start_time
@@ -333,39 +339,39 @@ class AutoProcessorEngine:
 
             if self.simulation:
                 time.sleep(0.05)
-                self.log("[SIMULASI] Perhitungan database selesai.")
+                self.log(f"[SIMULASI] Perhitungan database {proc_label} selesai.")
                 return True
 
             # Update live GUI status counter
-            self.update_status(f"Sedang Memproses Database... ({int(elapsed)}s / ~{expected_sec}s)")
+            self.update_status(f"Sedang Memproses Database ({proc_label})... ({int(elapsed)}s / ~{expected_sec}s)")
 
-            # Periodic log update every 10s
-            if int(elapsed) >= last_log_sec + 10:
+            # Periodic log update: setiap 5 detik untuk tahunan, 10 detik untuk bulanan
+            if int(elapsed) >= last_log_sec + log_interval:
                 last_log_sec = int(elapsed)
-                self.log(f"Database masih bekerja... ({last_log_sec} detik berjalan)")
+                self.log(f"Database ({proc_label}) masih bekerja... ({last_log_sec} detik berjalan)")
 
             # 1. Cek jika popup dialog selesai muncul (MessageBox OK)
             popup_hwnd = self.find_popup_dialog()
             if popup_hwnd:
                 self.log(f"Popup selesai terdeteksi setelah {int(elapsed)} detik. Mengonfirmasi OK...")
-                time.sleep(0.4)
+                time.sleep(0.3)
                 if HAS_PYAUTOGUI:
                     pyautogui.press('enter')
-                    time.sleep(0.2)
+                    time.sleep(0.15)
                     pyautogui.press('space')
-                    time.sleep(0.2)
+                    time.sleep(0.15)
 
                 ok_pt = resolve_target_coordinate("popup_btn_ok", user_coords=user_coords)
                 if HAS_PYAUTOGUI and ok_pt:
                     pyautogui.click(ok_pt[0], ok_pt[1])
 
-                time.sleep(0.6)
+                time.sleep(0.5)
                 return True
 
             # 2. Cek status tombol [Tutup] (aktif/hijau = kalkulasi tuntas!)
             if elapsed >= min_wait_sec:
                 if self.is_tutup_button_enabled(dialog_type):
-                    self.log(f"Kalkulasi selesai sempurna dalam {int(elapsed)} detik (tombol Tutup telah aktif kembali).")
+                    self.log(f"Kalkulasi ({proc_label}) selesai sempurna dalam {int(elapsed)} detik (tombol Tutup telah aktif kembali).")
                     time.sleep(0.5)
                     return True
 

@@ -78,5 +78,8 @@
             960,
             570
         ]
-    }
+    },
+    "tahunan_poll_interval_sec": 0.5,
+    "tahunan_expected_duration_sec": 10,
+    "tahunan_min_wait_before_check_sec": 4
 }
