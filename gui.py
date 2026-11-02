@@ -307,7 +307,7 @@ class MainBotApp:
 
         self.engine = AutoProcessorEngine(
             on_log=self.append_log,
-            on_status=lambda s: self.set_status_text(s, "running" if not self.is_paused else "paused"),
+            on_status=self.handle_status_change,
             on_progress=self.update_progress,
             on_finished=self.on_engine_finished,
             simulation=sim_mode,
@@ -315,6 +315,14 @@ class MainBotApp:
             bot_window_rect=bot_rect
         )
         self.engine.start(start_y, end_y, do_annual)
+
+    def handle_status_change(self, text: str):
+        if "DIJEDA" in text:
+            self.is_paused = True
+            self.btn_pause.config(text="▶ LANJUTKAN")
+            self.set_status_text(text, "paused")
+        else:
+            self.set_status_text(text, "running" if not self.is_paused else "paused")
 
     def toggle_pause(self):
         if not self.engine:

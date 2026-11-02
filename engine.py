@@ -134,9 +134,9 @@ class AutoProcessorEngine:
     def get_control_coord(self, control_name: str, dialog_type: str = "bulanan") -> Tuple[int, int]:
         """
         Computes the target coordinate:
-        1. Prioritizes user custom calibrated coordinate from config.json.
-        2. Computes dynamic coordinate from actual dialog window position + relative offsets.
-        3. Falls back to static configured coordinate with bot window masking.
+        1. Prioritas Utama: Dynamic rect offset dari jendela dialog aktif (kebal geser / drag window).
+        2. Prioritas Kedua: Koordinat kalibrasi langsung jika jendela belum/tidak terlacak.
+        3. Fallback: Vision template matching & scaled baseline.
         """
         cfg = load_config()
         key_map = {
@@ -150,12 +150,7 @@ class AutoProcessorEngine:
         cfg_key = key_map.get(control_name, control_name)
         user_coords = cfg.get("coords", {})
 
-        # 1. Prioritaskan koordinat hasil kalibrasi langsung pengguna jika ada
-        if cfg.get("calibrated") and cfg_key in user_coords and user_coords[cfg_key]:
-            c = user_coords[cfg_key]
-            return (c[0], c[1])
-
-        # 2. Dynamic rect offset jika dialog digeser di layar
+        # 1. Dynamic rect offset: selalu ikuti posisi dialog terkini di mana pun ditarik/digeser pengguna di layar
         rect = self.get_dialog_rect("bulanan" if dialog_type == "bulanan" else "tahunan")
         offsets = REL_OFFSETS_BULANAN if dialog_type == "bulanan" else REL_OFFSETS_TAHUNAN
 
@@ -164,8 +159,54 @@ class AutoProcessorEngine:
             dx, dy = offsets[control_name]
             return (left + dx, top + dy)
 
+        # 2. Prioritaskan koordinat hasil kalibrasi pengguna jika dialog belum terdeteksi rect-nya
+        if cfg.get("calibrated") and cfg_key in user_coords and user_coords[cfg_key]:
+            c = user_coords[cfg_key]
+            return (c[0], c[1])
+
         # 3. Fallback ke vision template / defaults
         return resolve_target_coordinate(cfg_key, user_coords=user_coords, exclude_rect=self.bot_window_rect)
+
+    def safe_click(self, x: int, y: int, desc: str = ""):
+        """
+        Safely moves mouse and clicks target coordinate with user intervention detection.
+        If the user is actively fighting or moving the mouse, automatically pauses for safety.
+        """
+        if self.simulation:
+            time.sleep(0.05)
+            return
+
+        if not HAS_PYAUTOGUI:
+            return
+
+        # 1. Bawa iPos ke latar depan terlebih dahulu jika tertutup
+        self.focus_ipos_window()
+
+        # 2. Gerakkan kursor secara halus ke elemen target
+        pyautogui.moveTo(x, y, duration=0.22)
+
+        # 3. Cek apakah kursor digeser paksa oleh pengguna (drift check)
+        p1 = pyautogui.position()
+        time.sleep(0.06)
+        p2 = pyautogui.position()
+        drift = ((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2) ** 0.5
+
+        if drift > 8:
+            self.log(f"⚠️ Terdeteksi pergerakan mouse oleh pengguna ({int(drift)}px). Mengaktifkan JEDA demi keamanan!")
+            self._pause_event.set()
+            self.update_status("DIJEDA: Terdeteksi Gerakan Mouse Pengguna")
+            while self._pause_event.is_set() and not self._stop_event.is_set():
+                time.sleep(0.5)
+
+            # Setelah di-resume pengguna, fokuskan ulang dan gerakkan kembali ke koordinat
+            if not self._stop_event.is_set():
+                self.focus_ipos_window()
+                pyautogui.moveTo(x, y, duration=0.2)
+
+        # 4. Lakukan klik
+        if not self._stop_event.is_set():
+            pyautogui.click(x, y)
+            time.sleep(0.15)
 
     def find_ipos_window(self) -> Optional[int]:
         """Find handle of the main iPos window or active dialog."""
@@ -302,8 +343,8 @@ class AutoProcessorEngine:
         time.sleep(0.2)
 
         # Click Yes coordinate
-        pyautogui.click(pt_yes[0], pt_yes[1])
-        time.sleep(0.8)
+        self.safe_click(pt_yes[0], pt_yes[1], "Tombol Yes")
+        time.sleep(0.5)
         return True
 
     def wait_for_modal_completion(self, dialog_type: str = "bulanan", max_wait_sec: int = 1800) -> bool:
@@ -363,7 +404,7 @@ class AutoProcessorEngine:
 
                 ok_pt = resolve_target_coordinate("popup_btn_ok", user_coords=user_coords)
                 if HAS_PYAUTOGUI and ok_pt:
-                    pyautogui.click(ok_pt[0], ok_pt[1])
+                    self.safe_click(ok_pt[0], ok_pt[1], "Tombol OK")
 
                 time.sleep(0.5)
                 return True
@@ -400,13 +441,13 @@ class AutoProcessorEngine:
 
         # 1. Pastikan Tab 'Proses Data' di menu atas aktif
         pt_tab = resolve_target_coordinate("tab_proses_data", user_coords=cfg.get("coords"))
-        pyautogui.click(pt_tab[0], pt_tab[1])
+        self.safe_click(pt_tab[0], pt_tab[1], "Tab Proses Data")
         time.sleep(0.3)
 
         # 2. Klik tombol Ribbon 'Proses Bulanan'
         pt = resolve_target_coordinate("ribbon_bulanan", "ribbon_bulanan.png", cfg.get("coords"))
         self.log(f"Mengklik tombol Ribbon 'Proses Bulanan' di ({pt[0]}, {pt[1]})...")
-        pyautogui.click(pt[0], pt[1])
+        self.safe_click(pt[0], pt[1], "Ribbon Proses Bulanan")
         time.sleep(1.2)
 
     def close_dialog_bulanan(self):
@@ -417,7 +458,7 @@ class AutoProcessorEngine:
             return
 
         pt = self.get_control_coord("btn_tutup", "bulanan")
-        pyautogui.click(pt[0], pt[1])
+        self.safe_click(pt[0], pt[1], "Tombol Tutup Bulanan")
         time.sleep(0.5)
         if self.get_dialog_rect("bulanan"):
             pyautogui.press('esc')
@@ -438,12 +479,12 @@ class AutoProcessorEngine:
         cfg = load_config()
 
         pt_tab = resolve_target_coordinate("tab_proses_data", user_coords=cfg.get("coords"))
-        pyautogui.click(pt_tab[0], pt_tab[1])
+        self.safe_click(pt_tab[0], pt_tab[1], "Tab Proses Data")
         time.sleep(0.3)
 
         pt = resolve_target_coordinate("ribbon_tahunan", "ribbon_tahunan.png", cfg.get("coords"))
         self.log(f"Mengklik tombol Ribbon 'Proses Tahunan' di ({pt[0]}, {pt[1]})...")
-        pyautogui.click(pt[0], pt[1])
+        self.safe_click(pt[0], pt[1], "Ribbon Proses Tahunan")
         time.sleep(1.2)
 
     def close_dialog_tahunan(self):
@@ -454,7 +495,7 @@ class AutoProcessorEngine:
             return
 
         pt = self.get_control_coord("btn_tutup", "tahunan")
-        pyautogui.click(pt[0], pt[1])
+        self.safe_click(pt[0], pt[1], "Tombol Tutup Tahunan")
         time.sleep(0.5)
         if self.get_dialog_rect("tahunan"):
             pyautogui.press('esc')
@@ -482,7 +523,7 @@ class AutoProcessorEngine:
             self.log(f"Memilih bulan {month_name} di ({pt_bulan[0]}, {pt_bulan[1]})...")
             
             # Klik tepat pada combobox untuk memastikan kontrol bulan aktif dan berfokus
-            pyautogui.click(pt_bulan[0], pt_bulan[1])
+            self.safe_click(pt_bulan[0], pt_bulan[1], "Dropdown Bulan")
             time.sleep(0.3)
 
             # Reset paksa ke Januari (Indeks 0) dari posisi apa pun
@@ -508,7 +549,7 @@ class AutoProcessorEngine:
             if month_idx == 1:
                 pt_tahun = self.get_control_coord("spin_tahun", "bulanan")
                 self.log(f"Mengisi tahun {year} di ({pt_tahun[0]}, {pt_tahun[1]})...")
-                pyautogui.click(pt_tahun[0], pt_tahun[1])
+                self.safe_click(pt_tahun[0], pt_tahun[1], "Input Tahun")
                 time.sleep(0.2)
                 pyautogui.hotkey('ctrl', 'a')
                 pyautogui.press('backspace')
@@ -526,7 +567,7 @@ class AutoProcessorEngine:
                 if is_active_period:
                     pt_chk = self.get_control_coord("chk_stok", "bulanan")
                     self.log(f"Mengaktifkan centang 'Perbaikan Stok' (periode aktif saat ini: {month_name} {year}) di ({pt_chk[0]}, {pt_chk[1]})...")
-                    pyautogui.click(pt_chk[0], pt_chk[1])
+                    self.safe_click(pt_chk[0], pt_chk[1], "Checkbox Perbaikan Stok")
                     time.sleep(0.25)
                 else:
                     self.log(f"Info: 'Perbaikan Stok' dilewati untuk {month_name} {year} (hanya berlaku pada bulan & tahun aktif saat ini: {MONTH_NAMES[now.month - 1]} {now.year}).")
@@ -534,7 +575,7 @@ class AutoProcessorEngine:
             # 4. Klik Tombol [ Proses ]
             pt_proses = self.get_control_coord("btn_proses", "bulanan")
             self.log(f"Mengklik tombol [ Proses ] di ({pt_proses[0]}, {pt_proses[1]})...")
-            pyautogui.click(pt_proses[0], pt_proses[1])
+            self.safe_click(pt_proses[0], pt_proses[1], "Tombol Proses Bulanan")
             time.sleep(0.6)
 
             # 4b. Tangani Modal Konfirmasi ('Apakah anda akan melakukan proses bulanan = ...?')
@@ -571,7 +612,7 @@ class AutoProcessorEngine:
             # 3. Set Tahun pada dialog Proses Tahunan
             pt_tahun = self.get_control_coord("spin_tahun", "tahunan")
             self.log(f"Mengatur tahun {year} pada form Tahunan di ({pt_tahun[0]}, {pt_tahun[1]})...")
-            pyautogui.click(pt_tahun[0], pt_tahun[1])
+            self.safe_click(pt_tahun[0], pt_tahun[1], "Input Tahun Tahunan")
             time.sleep(0.25)
             pyautogui.hotkey('ctrl', 'a')
             pyautogui.press('backspace')
@@ -582,7 +623,7 @@ class AutoProcessorEngine:
             # 4. Klik Tombol [ Proses ] Tahunan
             pt_proses = self.get_control_coord("btn_proses", "tahunan")
             self.log(f"Mengklik tombol [ Proses ] Tahunan di ({pt_proses[0]}, {pt_proses[1]})...")
-            pyautogui.click(pt_proses[0], pt_proses[1])
+            self.safe_click(pt_proses[0], pt_proses[1], "Tombol Proses Tahunan")
             time.sleep(0.6)
 
             # 4b. Tangani Modal Konfirmasi Tutup Tahun
@@ -626,7 +667,7 @@ class AutoProcessorEngine:
                 cfg = load_config()
                 pt_tab = resolve_target_coordinate("tab_proses_data", user_coords=cfg.get("coords"))
                 self.log(f"Mengaktifkan Tab Menu 'Proses Data' di ({pt_tab[0]}, {pt_tab[1]})...")
-                pyautogui.click(pt_tab[0], pt_tab[1])
+                self.safe_click(pt_tab[0], pt_tab[1], "Tab Menu Proses Data")
                 time.sleep(0.5)
 
             for y in range(start_year, end_year + 1):
