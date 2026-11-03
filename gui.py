@@ -35,9 +35,14 @@ class MainBotApp:
         self.engine = None
         self.is_paused = False
 
+        # Timer & Stopwatch variables
+        self.start_time = None
+        self.elapsed_offset = 0.0
+        self.timer_running = False
+        self._timer_after_id = None
+
         self._build_ui()
         self._setup_hotkeys()
-        self.poll_ipos_info()
 
     def _build_ui(self):
         # Header banner
@@ -128,7 +133,7 @@ class MainBotApp:
 
         self.lbl_status = tk.Label(
             status_frame,
-            text="STATUS: SIAP (Buka tab 'Proses Data' di iPos, lalu klik Mulai)",
+            text="STATUS: SIAP (Klik Mulai untuk Menjalankan Otomasi)",
             font=("Segoe UI", 10, "bold"),
             fg="#0f766e",
             bg="#f0fdf4",
@@ -137,35 +142,7 @@ class MainBotApp:
             padx=10,
             pady=6
         )
-        self.lbl_status.pack(fill="x", pady=(0, 6))
-
-        # Real-time iPos Info Badge (Tab & Database yang sedang aktif)
-        info_row = ttk.Frame(status_frame)
-        info_row.pack(fill="x", pady=(0, 6))
-
-        self.lbl_ipos_tab = tk.Label(
-            info_row,
-            text="Tab iPos Aktif: Mendeteksi...",
-            font=("Segoe UI", 8, "bold"),
-            fg="#0369a1",
-            bg="#f0f9ff",
-            padx=8,
-            pady=2,
-            relief="groove"
-        )
-        self.lbl_ipos_tab.pack(side="left", padx=(0, 6))
-
-        self.lbl_ipos_db = tk.Label(
-            info_row,
-            text="Database: -",
-            font=("Segoe UI", 8),
-            fg="#475569",
-            bg="#f8fafc",
-            padx=8,
-            pady=2,
-            relief="groove"
-        )
-        self.lbl_ipos_db.pack(side="left")
+        self.lbl_status.pack(fill="x", pady=(0, 8))
 
         progress_row = ttk.Frame(status_frame)
         progress_row.pack(fill="x", pady=2)
@@ -176,8 +153,19 @@ class MainBotApp:
         self.lbl_pct = ttk.Label(progress_row, text="0%", font=("Segoe UI", 9, "bold"), width=6)
         self.lbl_pct.pack(side="right")
 
-        self.lbl_step = ttk.Label(status_frame, text="Tahapan: 0 dari 0 selesai", font=("Segoe UI", 8), foreground="#64748b")
-        self.lbl_step.pack(anchor="w", pady=(2, 0))
+        step_row = ttk.Frame(status_frame)
+        step_row.pack(fill="x", pady=(4, 0))
+
+        self.lbl_step = ttk.Label(step_row, text="Tahapan: 0 dari 0 selesai", font=("Segoe UI", 8), foreground="#64748b")
+        self.lbl_step.pack(side="left")
+
+        self.lbl_timer = ttk.Label(
+            step_row,
+            text="Waktu Berjalan: 00:00:00",
+            font=("Segoe UI", 8, "bold"),
+            foreground="#0369a1"
+        )
+        self.lbl_timer.pack(side="right")
 
         # 3. Control Buttons
         btn_frame = ttk.Frame(content)
@@ -245,7 +233,7 @@ class MainBotApp:
         self.txt_log.pack(fill="both", expand=True)
 
         self.append_log("Bot Auto-Proses Data iPos 4.0 siap digunakan.")
-        self.append_log("Pastikan Tab 'Proses Data' di menu atas iPos 4.0 sudah terbuka.")
+        self.append_log("Bot otomatis mencari iPos 4.0 yang aktif dan mengaktifkan Tab 'Proses Data'.")
 
     def _setup_hotkeys(self):
         if HAS_KEYBOARD:
@@ -259,32 +247,58 @@ class MainBotApp:
         if self.engine and self.engine.is_running:
             self.root.after(0, self.stop_automation)
 
-    def poll_ipos_info(self):
-        """Periodically checks and updates the active iPos tab and database in the UI."""
-        try:
-            dummy_engine = AutoProcessorEngine(simulation=True)
-            info = dummy_engine.get_ipos_info()
-            if info.get("is_ipos"):
-                tab = info.get("active_tab", "Menu Utama")
-                db = info.get("database", "-")
-                user = info.get("user", "-")
-                self.lbl_ipos_tab.config(
-                    text=f"Tab iPos Aktif: [ {tab} ]",
-                    fg="#047857"
-                )
-                self.lbl_ipos_db.config(
-                    text=f"Database: {db} (User: {user})"
-                )
-            else:
-                self.lbl_ipos_tab.config(
-                    text="Tab iPos Aktif: [ Tidak Terdeteksi ]",
-                    fg="#94a3b8"
-                )
-                self.lbl_ipos_db.config(text="Database: -")
-        except Exception:
-            pass
-        finally:
-            self.root.after(2000, self.poll_ipos_info)
+    # =========================================================================
+    # Timelapse / Stopwatch Timer Methods
+    # =========================================================================
+    def _start_timer(self):
+        self.start_time = time.time()
+        self.elapsed_offset = 0.0
+        self.timer_running = True
+        self.lbl_timer.config(text="Waktu Berjalan: 00:00:00")
+        self._tick_timer()
+
+    def _pause_timer(self):
+        if self.timer_running and self.start_time:
+            self.elapsed_offset += time.time() - self.start_time
+            self.start_time = None
+            self.timer_running = False
+
+    def _resume_timer(self):
+        if not self.timer_running:
+            self.start_time = time.time()
+            self.timer_running = True
+            self._tick_timer()
+
+    def _stop_timer(self) -> str:
+        final_str = "00:00:00"
+        if self.timer_running and self.start_time:
+            total_sec = self.elapsed_offset + (time.time() - self.start_time)
+            final_str = self._format_duration(total_sec)
+        elif self.elapsed_offset > 0:
+            final_str = self._format_duration(self.elapsed_offset)
+
+        self.timer_running = False
+        self.start_time = None
+        if self._timer_after_id:
+            try:
+                self.root.after_cancel(self._timer_after_id)
+            except Exception:
+                pass
+            self._timer_after_id = None
+        return final_str
+
+    def _format_duration(self, seconds: float) -> str:
+        s = int(seconds)
+        h = s // 3600
+        m = (s % 3600) // 60
+        sec = s % 60
+        return f"{h:02d}:{m:02d}:{sec:02d}"
+
+    def _tick_timer(self):
+        if self.timer_running and self.start_time:
+            total_sec = self.elapsed_offset + (time.time() - self.start_time)
+            self.lbl_timer.config(text=f"Waktu Berjalan: {self._format_duration(total_sec)}")
+            self._timer_after_id = self.root.after(500, self._tick_timer)
 
     def append_log(self, text: str):
         def _do():
@@ -370,6 +384,7 @@ class MainBotApp:
             check_perbaikan_stok=chk_stok,
             bot_window_rect=bot_rect
         )
+        self._start_timer()
         self.engine.start(start_y, end_y, do_annual)
 
     def handle_status_change(self, text: str):
@@ -377,7 +392,12 @@ class MainBotApp:
             self.is_paused = True
             self.btn_pause.config(text="▶ LANJUTKAN")
             self.set_status_text(text, "paused")
+            self._pause_timer()
         else:
+            if self.is_paused and ("MELANJUTKAN" in text or "BERJALAN" in text):
+                self.is_paused = False
+                self.btn_pause.config(text="⏸ JEDA")
+                self._resume_timer()
             self.set_status_text(text, "running" if not self.is_paused else "paused")
 
     def toggle_pause(self):
@@ -388,27 +408,35 @@ class MainBotApp:
             self.is_paused = True
             self.btn_pause.config(text="▶ LANJUTKAN")
             self.set_status_text("DIJEDA (PAUSED)", "paused")
+            self._pause_timer()
         else:
             self.engine.resume()
             self.is_paused = False
             self.btn_pause.config(text="⏸ JEDA")
             self.set_status_text("MELANJUTKAN KEMBALI...", "running")
+            self._resume_timer()
 
     def stop_automation(self):
         if self.engine and self.engine.is_running:
             self.engine.stop()
             self.set_status_text("MENGHENTIKAN...", "error")
+            dur = self._stop_timer()
+            self.lbl_timer.config(text=f"Berhenti: {dur}")
 
     def on_engine_finished(self, success: bool, message: str):
         def _do():
+            dur_str = self._stop_timer()
             self.btn_start.config(state="normal")
             self.btn_pause.config(state="disabled", text="⏸ JEDA")
             self.btn_stop.config(state="disabled")
             self.is_paused = False
 
+            self.lbl_timer.config(text=f"Total: {dur_str}")
+            self.append_log(f"--- TOTAL WAKTU EKSEKUSI: {dur_str} ---")
+
             if success:
                 self.set_status_text("SELESAI DENGAN SUKSES (100%)", "info")
-                messagebox.showinfo("Otomasi Selesai", "Semua proses bulanan dan tahunan telah berhasil dijalankan!")
+                messagebox.showinfo("Otomasi Selesai", f"Semua proses bulanan dan tahunan telah berhasil dijalankan!\nTotal Waktu: {dur_str}")
             else:
                 self.set_status_text("OTOMASI DIHENTIKAN", "error")
         self.root.after(0, _do)
