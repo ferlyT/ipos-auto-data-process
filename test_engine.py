@@ -1,6 +1,6 @@
 """
-Unit and integration test for AutoProcessorEngine simulation mode.
-Verifies multi-year loop, month step transitions, annual closing trigger, and callbacks.
+Unit and integration test for AutoProcessorEngine simulation mode and Calibration logic.
+Verifies multi-year loop, month step transitions, annual closing trigger, tab parsing, and calibration.
 """
 import sys
 import os
@@ -10,7 +10,8 @@ import threading
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import load_config, save_config
-from engine import AutoProcessorEngine
+from engine import AutoProcessorEngine, MONTH_NAMES, REL_OFFSETS_BULANAN
+from vision import get_default_scaled_coordinates
 
 def test_engine_simulation():
     print("Testing Engine in Simulation Mode...")
@@ -25,8 +26,8 @@ def test_engine_simulation():
     def on_status(st):
         statuses.append(st)
 
-    def on_prog(cur, tot, pct):
-        progress_history.append((cur, tot, pct))
+    def on_prog(cur, total, pct):
+        progress_history.append((cur, total, pct))
 
     def on_finished(ok, msg):
         finished_result["ok"] = ok
@@ -92,7 +93,23 @@ def test_engine_simulation():
     assert res3["active_tab"] == "Laporan Penjualan"
     print("[PASS] Active Tab parsing test succeeded.")
 
-    print("\nALL AUTOMATED ENGINE TESTS PASSED!")
+    # Test Month Selection & Calibration Offsets
+    print("Testing Month Selection naming & calibration offsets...")
+    assert MONTH_NAMES[0] == "Januari", f"Month 1 should be 'Januari', got {MONTH_NAMES[0]}"
+    assert MONTH_NAMES[1] == "Februari", f"Month 2 should be 'Februari', got {MONTH_NAMES[1]}"
+    assert len(MONTH_NAMES) == 12
+
+    # Verify dropdown_bulan offset relative to bulanan dialog
+    assert "dropdown_bulan" in REL_OFFSETS_BULANAN
+    dx, dy = REL_OFFSETS_BULANAN["dropdown_bulan"]
+    assert dx == 219 and dy == 274, f"Unexpected dropdown_bulan relative offset: {dx}, {dy}"
+
+    # Verify default scaled coordinates include bulanan_dropdown_bulan
+    defs = get_default_scaled_coordinates()
+    assert "bulanan_dropdown_bulan" in defs
+    print("[PASS] Month Selection & Calibration offset tests succeeded.")
+
+    print("\nALL AUTOMATED ENGINE & CALIBRATION TESTS PASSED!")
 
 if __name__ == "__main__":
     test_engine_simulation()
