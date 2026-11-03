@@ -389,17 +389,44 @@ class AutoProcessorEngine:
         hwnd = self.find_ipos_window()
         if hwnd:
             try:
+                import ctypes, win32process, win32api
+                user32 = ctypes.windll.user32
+
                 # 1. Pulihkan jika jendela diminimize
                 if win32gui.IsIconic(hwnd):
                     win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
                 else:
                     win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
 
-                # 2. Bawa ke latar depan
-                import ctypes
-                ctypes.windll.user32.SwitchToThisWindow(hwnd, True)
-                win32gui.SetForegroundWindow(hwnd)
-                win32gui.BringWindowToTop(hwnd)
+                # 2. AttachThreadInput & Alt trick untuk bypass pembatasan fokus Windows
+                fore_hwnd = win32gui.GetForegroundWindow()
+                if fore_hwnd != hwnd:
+                    fore_tid, _ = win32process.GetWindowThreadProcessId(fore_hwnd)
+                    target_tid, _ = win32process.GetWindowThreadProcessId(hwnd)
+                    cur_tid = win32api.GetCurrentThreadId()
+
+                    try:
+                        user32.AttachThreadInput(cur_tid, fore_tid, True)
+                        user32.AttachThreadInput(cur_tid, target_tid, True)
+                    except Exception:
+                        pass
+
+                    user32.keybd_event(0x12, 0, 0, 0) # Alt down
+                    user32.keybd_event(0x12, 0, 2, 0) # Alt up
+
+                    win32gui.SetForegroundWindow(hwnd)
+                    win32gui.BringWindowToTop(hwnd)
+                    user32.SwitchToThisWindow(hwnd, True)
+
+                    try:
+                        user32.AttachThreadInput(cur_tid, fore_tid, False)
+                        user32.AttachThreadInput(cur_tid, target_tid, False)
+                    except Exception:
+                        pass
+                else:
+                    win32gui.SetForegroundWindow(hwnd)
+                    win32gui.BringWindowToTop(hwnd)
+
                 time.sleep(0.35)
                 return True
             except Exception:
@@ -641,7 +668,7 @@ class AutoProcessorEngine:
 
         for attempt in range(3):
             # 1. Pastikan Tab 'Proses Data' di menu atas aktif
-            pt_tab = resolve_target_coordinate("tab_proses_data", user_coords=cfg.get("coords"))
+            pt_tab = resolve_target_coordinate("tab_proses_data", "tab_proses_data.png", cfg.get("coords"))
             self.safe_click(pt_tab[0], pt_tab[1], "Tab Proses Data")
             time.sleep(0.4)
 
@@ -679,7 +706,7 @@ class AutoProcessorEngine:
         cfg = load_config()
 
         for attempt in range(3):
-            pt_tab = resolve_target_coordinate("tab_proses_data", user_coords=cfg.get("coords"))
+            pt_tab = resolve_target_coordinate("tab_proses_data", "tab_proses_data.png", cfg.get("coords"))
             self.safe_click(pt_tab[0], pt_tab[1], "Tab Proses Data")
             time.sleep(0.4)
 
@@ -876,7 +903,7 @@ class AutoProcessorEngine:
 
                 # Klik Tab Menu 'Proses Data' di menu atas iPos 4.0
                 cfg = load_config()
-                pt_tab = resolve_target_coordinate("tab_proses_data", user_coords=cfg.get("coords"))
+                pt_tab = resolve_target_coordinate("tab_proses_data", "tab_proses_data.png", cfg.get("coords"))
                 self.log(f"Mengaktifkan Tab Menu 'Proses Data' di ({pt_tab[0]}, {pt_tab[1]})...")
                 self.safe_click(pt_tab[0], pt_tab[1], "Tab Menu Proses Data")
                 time.sleep(0.5)

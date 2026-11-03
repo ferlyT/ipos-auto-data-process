@@ -19,9 +19,9 @@ DEFAULT_CONFIG = {
     "window_title_keywords": ["Proses Bulanan", "Proses Tahunan", "Proses Data", "iPos", "Program iPos"],
     "calibrated": True,
     "coords": {
-        "tab_proses_data": [626, 79],             # Tab 'Proses Data' di Menu Atas
-        "ribbon_bulanan": [24, 141],              # Tombol Ribbon 'Proses Bulanan'
-        "ribbon_tahunan": [75, 141],              # Tombol Ribbon 'Proses Tahunan'
+        "tab_proses_data": [595, 43],             # Tab 'Proses Data' di Menu Atas
+        "ribbon_bulanan": [22, 94],               # Tombol Ribbon 'Proses Bulanan'
+        "ribbon_tahunan": [68, 85],               # Tombol Ribbon 'Proses Tahunan'
         "bulanan_dropdown_bulan": [922, 502],     # Dropdown Bulan di Proses Bulanan
         "bulanan_spin_tahun": [1028, 502],        # Input Tahun di Proses Bulanan
         "bulanan_chk_perbaikan_stok": [874, 531], # Checkbox Perbaikan Stok
