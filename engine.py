@@ -117,16 +117,20 @@ class AutoProcessorEngine:
 
                 if match:
                     # Filter out main window or bot window
-                    if "menu utama" not in t_lower and "auto proses" not in t_lower:
+                    if "menu utama" not in t_lower and "auto proses" not in t_lower and "program ipos" not in t_lower:
                         rect = win32gui.GetWindowRect(hwnd)
                         w = rect[2] - rect[0]
                         h = rect[3] - rect[1]
-                        if 250 < w < 850 and 250 < h < 850:
+                        if 200 < w < 950 and 200 < h < 950:
                             found_rect = rect
             return True
 
         try:
             win32gui.EnumWindows(enum_cb, None)
+            if not found_rect:
+                ipos_hwnd = self.find_ipos_window()
+                if ipos_hwnd:
+                    win32gui.EnumChildWindows(ipos_hwnd, enum_cb, None)
         except Exception:
             pass
 
@@ -221,7 +225,9 @@ class AutoProcessorEngine:
 
         # 4. Lakukan klik
         if not self._stop_event.is_set():
-            pyautogui.click(x, y)
+            pyautogui.mouseDown(x, y)
+            time.sleep(0.08)
+            pyautogui.mouseUp(x, y)
             time.sleep(0.15)
 
     @staticmethod
