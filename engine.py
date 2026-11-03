@@ -8,6 +8,7 @@ Calibrated precisely to match iPos 4.0 UI layout with dynamic window tracking:
 import time
 import threading
 import traceback
+import re
 from datetime import datetime
 from typing import Callable, Optional, Tuple
 from config import load_config
@@ -223,23 +224,98 @@ class AutoProcessorEngine:
             pyautogui.click(x, y)
             time.sleep(0.15)
 
+    @staticmethod
+    def parse_ipos_title(title: str) -> dict:
+        """
+        Parses iPos 4.0 window title to extract:
+        - is_ipos: bool
+        - active_tab (e.g. 'Neraca', 'Menu Utama', 'Daftar Item')
+        - database (e.g. 'bafnov2026')
+        - user (e.g. 'ADMIN')
+        - version (e.g. '4.0.9.0')
+        """
+        t_clean = title.strip()
+        info = {
+            "is_ipos": False,
+            "active_tab": "Menu Utama",
+            "version": "4.0",
+            "user": "-",
+            "database": "-",
+            "raw_title": t_clean
+        }
+
+        # Pattern 1: '<TabName> - i P o s <Version>, User : <User>, Lokasi : <Lokasi>, Host : <Host>, Database : <Database>'
+        m = re.search(r'^(.*?)\s*-\s*i\s*p\s*o\s*s\s*([\d\.]+)?', t_clean, re.IGNORECASE)
+        if m:
+            info["is_ipos"] = True
+            tab_raw = m.group(1).strip()
+            info["active_tab"] = tab_raw if tab_raw else "Menu Utama"
+            if m.group(2):
+                info["version"] = m.group(2).strip()
+
+            user_m = re.search(r'user\s*:\s*([^,]+)', t_clean, re.IGNORECASE)
+            if user_m:
+                info["user"] = user_m.group(1).strip()
+
+            db_m = re.search(r'database\s*:\s*([^,]+)', t_clean, re.IGNORECASE)
+            if db_m:
+                info["database"] = db_m.group(1).strip()
+            return info
+
+        # Pattern 2: Matching general iPos titles (e.g., 'Program Toko iPos 4.0', 'Menu Utama')
+        t_lower = t_clean.lower()
+        if re.search(r'i\s*p\s*o\s*s', t_lower) or "program toko" in t_lower or "menu utama" in t_lower:
+            info["is_ipos"] = True
+            info["active_tab"] = t_clean
+            return info
+
+        return info
+
+    def get_ipos_info(self) -> dict:
+        """Inspects all visible windows and returns parsed iPos 4.0 metadata."""
+        if not HAS_WIN32:
+            return {"is_ipos": False, "active_tab": "N/A", "user": "-", "database": "-"}
+
+        ipos_info = None
+
+        def enum_cb(hwnd, _):
+            nonlocal ipos_info
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd).strip()
+                if "auto proses" not in title.lower():
+                    info = self.parse_ipos_title(title)
+                    if info["is_ipos"]:
+                        info["hwnd"] = hwnd
+                        ipos_info = info
+            return True
+
+        try:
+            win32gui.EnumWindows(enum_cb, None)
+        except Exception:
+            pass
+
+        return ipos_info or {"is_ipos": False, "active_tab": "Tidak Ditemukan", "user": "-", "database": "-"}
+
     def find_ipos_window(self) -> Optional[int]:
         """Find handle of the main iPos window or active dialog."""
         if not HAS_WIN32:
             return None
         
-        keywords = [
-            "proses bulanan", "proses tutup tahun", "proses tahunan", "tutup tahun",
-            "proses data", "menu utama", "ipos 4", "program ipos", "program toko"
-        ]
         found = []
 
         def enum_cb(hwnd, _):
             if win32gui.IsWindowVisible(hwnd):
-                title = win32gui.GetWindowText(hwnd).strip().lower()
-                if any(k in title for k in keywords):
-                    if "auto proses" not in title:
-                        found.append((hwnd, title))
+                title = win32gui.GetWindowText(hwnd).strip()
+                t_lower = title.lower()
+                if "auto proses" not in t_lower:
+                    # 1. Dialog proses aktif (Proses Bulanan / Tutup Tahun)
+                    if any(k in t_lower for k in ["proses bulanan", "proses tutup tahun", "proses tahunan", "tutup tahun"]):
+                        found.append((hwnd, title, True))
+                    else:
+                        # 2. Jendela utama iPos (dengan tab apa pun yang sedang aktif: Neraca, Menu Utama, dll)
+                        info = self.parse_ipos_title(title)
+                        if info["is_ipos"]:
+                            found.append((hwnd, title, False))
             return True
 
         try:
@@ -249,13 +325,10 @@ class AutoProcessorEngine:
 
         if found:
             # 1. Prioritaskan jika dialog proses sedang terbuka
-            for hwnd, title in found:
-                if any(w in title for w in ["proses bulanan", "proses tutup tahun", "tutup tahun", "proses tahunan"]):
+            for hwnd, title, is_dlg in found:
+                if is_dlg:
                     return hwnd
-            # 2. Prioritaskan jendela Menu Utama iPos 4.0
-            for hwnd, title in found:
-                if "menu utama" in title or "ipos" in title:
-                    return hwnd
+            # 2. Prioritaskan jendela utama iPos
             return found[0][0]
         return None
 
@@ -732,6 +805,10 @@ class AutoProcessorEngine:
             # 0. Secara otomatis cari dan bawa iPos ke latar depan serta klik Tab 'Proses Data'
             if not self.simulation:
                 self.log("Mencari jendela Program iPos 4.0 yang aktif di layar...")
+                info = self.get_ipos_info()
+                if info.get("is_ipos"):
+                    self.log(f"Jendela iPos 4.0 terdeteksi: Tab Aktif = '{info['active_tab']}', Database = '{info['database']}', User = '{info['user']}'.")
+
                 if self.focus_ipos_window():
                     self.log("Jendela Program iPos 4.0 terdeteksi dan diaktifkan.")
                 else:

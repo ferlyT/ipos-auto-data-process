@@ -74,6 +74,24 @@ def test_engine_simulation():
     assert stopped_result.get("ok") is False, "Stop signal should mark result ok=False"
     print("[PASS] Emergency Stop test succeeded.")
 
+    # Test Active Tab & iPos title parsing
+    print("Testing Active Tab parsing from iPos window titles...")
+    t1 = "Neraca - i P o s 4.0.9.0, User : ADMIN, Lokasi : UTM, Host : 127.0.0.1, Database : bafnov2026"
+    res1 = AutoProcessorEngine.parse_ipos_title(t1)
+    assert res1["is_ipos"] is True, "Failed to identify iPos window"
+    assert res1["active_tab"] == "Neraca", f"Expected tab 'Neraca', got {res1['active_tab']}"
+    assert res1["database"] == "bafnov2026", f"Expected database 'bafnov2026', got {res1['database']}"
+    assert res1["user"] == "ADMIN", f"Expected user 'ADMIN', got {res1['user']}"
+
+    t2 = "Menu Utama - i P o s 4.0.9.0, User : ADMIN, Lokasi : UTM, Host : 127.0.0.1, Database : bafnov2026"
+    res2 = AutoProcessorEngine.parse_ipos_title(t2)
+    assert res2["active_tab"] == "Menu Utama"
+
+    t3 = "Laporan Penjualan - iPos 4.0"
+    res3 = AutoProcessorEngine.parse_ipos_title(t3)
+    assert res3["active_tab"] == "Laporan Penjualan"
+    print("[PASS] Active Tab parsing test succeeded.")
+
     print("\nALL AUTOMATED ENGINE TESTS PASSED!")
 
 if __name__ == "__main__":

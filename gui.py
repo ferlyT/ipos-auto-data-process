@@ -37,6 +37,7 @@ class MainBotApp:
 
         self._build_ui()
         self._setup_hotkeys()
+        self.poll_ipos_info()
 
     def _build_ui(self):
         # Header banner
@@ -136,7 +137,35 @@ class MainBotApp:
             padx=10,
             pady=6
         )
-        self.lbl_status.pack(fill="x", pady=(0, 8))
+        self.lbl_status.pack(fill="x", pady=(0, 6))
+
+        # Real-time iPos Info Badge (Tab & Database yang sedang aktif)
+        info_row = ttk.Frame(status_frame)
+        info_row.pack(fill="x", pady=(0, 6))
+
+        self.lbl_ipos_tab = tk.Label(
+            info_row,
+            text="Tab iPos Aktif: Mendeteksi...",
+            font=("Segoe UI", 8, "bold"),
+            fg="#0369a1",
+            bg="#f0f9ff",
+            padx=8,
+            pady=2,
+            relief="groove"
+        )
+        self.lbl_ipos_tab.pack(side="left", padx=(0, 6))
+
+        self.lbl_ipos_db = tk.Label(
+            info_row,
+            text="Database: -",
+            font=("Segoe UI", 8),
+            fg="#475569",
+            bg="#f8fafc",
+            padx=8,
+            pady=2,
+            relief="groove"
+        )
+        self.lbl_ipos_db.pack(side="left")
 
         progress_row = ttk.Frame(status_frame)
         progress_row.pack(fill="x", pady=2)
@@ -229,6 +258,33 @@ class MainBotApp:
     def on_hotkey_emergency_stop(self):
         if self.engine and self.engine.is_running:
             self.root.after(0, self.stop_automation)
+
+    def poll_ipos_info(self):
+        """Periodically checks and updates the active iPos tab and database in the UI."""
+        try:
+            dummy_engine = AutoProcessorEngine(simulation=True)
+            info = dummy_engine.get_ipos_info()
+            if info.get("is_ipos"):
+                tab = info.get("active_tab", "Menu Utama")
+                db = info.get("database", "-")
+                user = info.get("user", "-")
+                self.lbl_ipos_tab.config(
+                    text=f"Tab iPos Aktif: [ {tab} ]",
+                    fg="#047857"
+                )
+                self.lbl_ipos_db.config(
+                    text=f"Database: {db} (User: {user})"
+                )
+            else:
+                self.lbl_ipos_tab.config(
+                    text="Tab iPos Aktif: [ Tidak Terdeteksi ]",
+                    fg="#94a3b8"
+                )
+                self.lbl_ipos_db.config(text="Database: -")
+        except Exception:
+            pass
+        finally:
+            self.root.after(2000, self.poll_ipos_info)
 
     def append_log(self, text: str):
         def _do():
