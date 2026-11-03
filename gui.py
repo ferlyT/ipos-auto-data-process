@@ -345,19 +345,7 @@ class MainBotApp:
         chk_stok = self.var_perbaikan_stok.get()
         sim_mode = self.var_sim.get()
 
-        if not sim_mode:
-            confirm = messagebox.askyesno(
-                "Konfirmasi Mulai Otomasi",
-                f"Otomasi akan memproses data dari tahun {start_y} s.d. {end_y}.\n"
-                f"- Proses Tahunan setelah Desember: {'AKTIF' if do_annual else 'TIDAK'}.\n"
-                f"- Opsi Perbaikan Stok: {'AKTIF (hanya berlaku pada bulan & tahun aktif saat ini)' if chk_stok else 'TIDAK'}.\n\n"
-                "Bot akan otomatis mencari iPos 4.0, mengklik tab 'Proses Data', dan menjalankan proses.\n"
-                "Mulai sekarang?"
-            )
-            if not confirm:
-                return
-
-        # UI State update
+        # UI State update (Eksekusi Instan Satu-Klik)
         self.btn_start.config(state="disabled")
         self.btn_pause.config(state="normal", text="⏸ JEDA")
         self.btn_stop.config(state="normal")

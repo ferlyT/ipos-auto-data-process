@@ -225,6 +225,44 @@ class AutoProcessorEngine:
             time.sleep(0.15)
 
     @staticmethod
+    def is_ipos_hwnd(hwnd: int) -> bool:
+        """Determines if a window handle truly belongs to iPos 4.0 application."""
+        if not HAS_WIN32:
+            return False
+        try:
+            cls = win32gui.GetClassName(hwnd).lower()
+            # Strict exclusion of browsers, file explorer, editors, terminals
+            if any(b in cls for b in ["chrome", "firefox", "edge", "opera", "brave", "cabinetwclass", "explorer", "code", "terminal", "console", "cmd"]):
+                return False
+
+            title = win32gui.GetWindowText(hwnd).strip()
+            if "auto proses" in title.lower() or "google chrome" in title.lower():
+                return False
+
+            # Check process executable name via QueryFullProcessImageNameW
+            import win32process
+            import ctypes
+            tid, pid = win32process.GetWindowThreadProcessId(hwnd)
+            h_proc = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+            if h_proc:
+                buf = ctypes.create_unicode_buffer(512)
+                sz = ctypes.c_ulong(512)
+                ctypes.windll.kernel32.QueryFullProcessImageNameW(h_proc, 0, buf, ctypes.byref(sz))
+                ctypes.windll.kernel32.CloseHandle(h_proc)
+                exe_path = buf.value.lower()
+                if "ipos4.exe" in exe_path or "program kreatif" in exe_path:
+                    return True
+
+            # Fallback to WinForms class and title structure
+            t_lower = title.lower()
+            if "windowsforms10" in cls and (re.search(r'i\s*p\s*o\s*s', t_lower) or any(k in t_lower for k in ["proses bulanan", "tutup tahun", "proses tahunan", "program toko"])):
+                return True
+
+            return False
+        except Exception:
+            return False
+
+    @staticmethod
     def parse_ipos_title(title: str) -> dict:
         """
         Parses iPos 4.0 window title to extract:
@@ -244,7 +282,20 @@ class AutoProcessorEngine:
             "raw_title": t_clean
         }
 
-        # Pattern 1: '<TabName> - i P o s <Version>, User : <User>, Lokasi : <Lokasi>, Host : <Host>, Database : <Database>'
+        # Exclude browsers
+        t_lower = t_clean.lower()
+        if any(b in t_lower for b in ["google chrome", "mozilla firefox", "microsoft edge", "file explorer", "auto proses data"]):
+            return info
+
+        user_m = re.search(r'user\s*:\s*([^,]+)', t_clean, re.IGNORECASE)
+        if user_m:
+            info["user"] = user_m.group(1).strip()
+
+        db_m = re.search(r'database\s*:\s*([^,]+)', t_clean, re.IGNORECASE)
+        if db_m:
+            info["database"] = db_m.group(1).strip()
+
+        # Pattern 1: With active tab prefix, e.g. 'Neraca - i P o s 4.0.9.0...'
         m = re.search(r'^(.*?)\s*-\s*i\s*p\s*o\s*s\s*([\d\.]+)?', t_clean, re.IGNORECASE)
         if m:
             info["is_ipos"] = True
@@ -252,21 +303,21 @@ class AutoProcessorEngine:
             info["active_tab"] = tab_raw if tab_raw else "Menu Utama"
             if m.group(2):
                 info["version"] = m.group(2).strip()
-
-            user_m = re.search(r'user\s*:\s*([^,]+)', t_clean, re.IGNORECASE)
-            if user_m:
-                info["user"] = user_m.group(1).strip()
-
-            db_m = re.search(r'database\s*:\s*([^,]+)', t_clean, re.IGNORECASE)
-            if db_m:
-                info["database"] = db_m.group(1).strip()
             return info
 
-        # Pattern 2: Matching general iPos titles (e.g., 'Program Toko iPos 4.0', 'Menu Utama')
-        t_lower = t_clean.lower()
-        if re.search(r'i\s*p\s*o\s*s', t_lower) or "program toko" in t_lower or "menu utama" in t_lower:
+        # Pattern 2: Starts directly with 'i P o s 4.0.9.0, User : ...' (Menu Utama / Dashboard)
+        m2 = re.search(r'^i\s*p\s*o\s*s\s*([\d\.]+)?', t_clean, re.IGNORECASE)
+        if m2:
             info["is_ipos"] = True
-            info["active_tab"] = t_clean
+            info["active_tab"] = "Menu Utama"
+            if m2.group(1):
+                info["version"] = m2.group(1).strip()
+            return info
+
+        # Pattern 3: General iPos / Program Toko titles (excluding browsers)
+        if "program toko" in t_lower or ("i p o s 4" in t_lower and "chrome" not in t_lower):
+            info["is_ipos"] = True
+            info["active_tab"] = "Menu Utama"
             return info
 
         return info
@@ -280,13 +331,12 @@ class AutoProcessorEngine:
 
         def enum_cb(hwnd, _):
             nonlocal ipos_info
-            if win32gui.IsWindowVisible(hwnd):
+            if win32gui.IsWindowVisible(hwnd) and self.is_ipos_hwnd(hwnd):
                 title = win32gui.GetWindowText(hwnd).strip()
-                if "auto proses" not in title.lower():
-                    info = self.parse_ipos_title(title)
-                    if info["is_ipos"]:
-                        info["hwnd"] = hwnd
-                        ipos_info = info
+                info = self.parse_ipos_title(title)
+                if info["is_ipos"]:
+                    info["hwnd"] = hwnd
+                    ipos_info = info
             return True
 
         try:
@@ -301,21 +351,12 @@ class AutoProcessorEngine:
         if not HAS_WIN32:
             return None
         
-        found = []
+        matches = []
 
         def enum_cb(hwnd, _):
-            if win32gui.IsWindowVisible(hwnd):
+            if win32gui.IsWindowVisible(hwnd) and self.is_ipos_hwnd(hwnd):
                 title = win32gui.GetWindowText(hwnd).strip()
-                t_lower = title.lower()
-                if "auto proses" not in t_lower:
-                    # 1. Dialog proses aktif (Proses Bulanan / Tutup Tahun)
-                    if any(k in t_lower for k in ["proses bulanan", "proses tutup tahun", "proses tahunan", "tutup tahun"]):
-                        found.append((hwnd, title, True))
-                    else:
-                        # 2. Jendela utama iPos (dengan tab apa pun yang sedang aktif: Neraca, Menu Utama, dll)
-                        info = self.parse_ipos_title(title)
-                        if info["is_ipos"]:
-                            found.append((hwnd, title, False))
+                matches.append((hwnd, title))
             return True
 
         try:
@@ -323,14 +364,22 @@ class AutoProcessorEngine:
         except Exception:
             pass
 
-        if found:
-            # 1. Prioritaskan jika dialog proses sedang terbuka
-            for hwnd, title, is_dlg in found:
-                if is_dlg:
-                    return hwnd
-            # 2. Prioritaskan jendela utama iPos
-            return found[0][0]
-        return None
+        if not matches:
+            return None
+
+        # 1. Prioritaskan jika dialog proses sedang terbuka
+        for hwnd, title in matches:
+            t_lower = title.lower()
+            if any(k in t_lower for k in ["proses bulanan", "proses tutup tahun", "proses tahunan", "tutup tahun"]):
+                return hwnd
+
+        # 2. Prioritaskan jendela utama iPos
+        for hwnd, title in matches:
+            t_lower = title.lower()
+            if re.search(r'i\s*p\s*o\s*s', t_lower) or "database" in t_lower or "user :" in t_lower:
+                return hwnd
+
+        return matches[0][0]
 
     def focus_ipos_window(self) -> bool:
         """Bring iPos window to foreground reliably."""
@@ -340,16 +389,26 @@ class AutoProcessorEngine:
         hwnd = self.find_ipos_window()
         if hwnd:
             try:
-                # Beri trigger tombol Alt agar Windows mengizinkan transfer fokus latar depan
-                if HAS_PYAUTOGUI:
-                    pyautogui.press('alt')
+                # 1. Pulihkan jika jendela diminimize
                 if win32gui.IsIconic(hwnd):
                     win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                else:
+                    win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+
+                # 2. Bawa ke latar depan
+                import ctypes
+                ctypes.windll.user32.SwitchToThisWindow(hwnd, True)
                 win32gui.SetForegroundWindow(hwnd)
+                win32gui.BringWindowToTop(hwnd)
                 time.sleep(0.35)
                 return True
             except Exception:
-                pass
+                try:
+                    import ctypes
+                    ctypes.windll.user32.SwitchToThisWindow(hwnd, True)
+                    return True
+                except Exception:
+                    pass
         return False
 
     def find_popup_dialog(self) -> Optional[int]:
